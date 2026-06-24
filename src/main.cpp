@@ -2,6 +2,7 @@
 #include "aestool/aes_ctr.hpp"
 #include "aestool/aes_extra_modes.hpp"
 #include "aestool/aes_gcm.hpp"
+#include "aestool/benchmark.hpp"
 #include "aestool/encoding.hpp"
 #include "aestool/file_utils.hpp"
 #include "aestool/nonce_registry.hpp"
@@ -31,7 +32,8 @@ void print_help() {
         << "  aestool keygen --out key.bin --bits 128|192|256\n"
         << "  aestool keyinfo --key key.bin\n"
         << "  aestool encrypt --mode ecb|cbc|cfb|ofb|ctr|gcm --key key.bin --in msg.txt --out ct.bin [--iv-hex HEX] [--aad-text TEXT] [--allow-ecb]\n"
-        << "  aestool decrypt --mode ecb|cbc|cfb|ofb|ctr|gcm --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n\n";
+        << "  aestool decrypt --mode ecb|cbc|cfb|ofb|ctr|gcm --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n"
+        << "  aestool bench --mode cbc|cfb|ofb|ctr|gcm --key key.bin --out result.csv\n\n";
 }
 
 std::string get_arg(int argc, char* argv[], const std::string& name) {
@@ -256,6 +258,28 @@ int run_encrypt(int argc, char* argv[]) {
     return 0;
 }
 
+
+int run_bench(int argc, char* argv[]) {
+    const std::string mode = get_arg(argc, argv, "--mode");
+    const std::string key_path = get_arg(argc, argv, "--key");
+    const std::string out_path = get_arg(argc, argv, "--out");
+
+    if (mode.empty() || key_path.empty() || out_path.empty()) {
+        std::cerr << "ERROR: bench requires --mode cbc|cfb|ofb|ctr|gcm --key key.bin --out result.csv\n";
+        return 1;
+    }
+
+    const std::vector<uint8_t> key = aestool::read_binary_file(key_path);
+
+    if (key.size() != 16 && key.size() != 24 && key.size() != 32) {
+        std::cerr << "ERROR: invalid AES key length for benchmark\n";
+        return 1;
+    }
+
+    aestool::run_benchmark_csv(mode, key, out_path);
+    return 0;
+}
+
 int run_decrypt(int argc, char* argv[]) {
     const std::string mode = get_arg(argc, argv, "--mode");
     const std::string key_path = get_arg(argc, argv, "--key");
@@ -349,6 +373,10 @@ int main(int argc, char* argv[]) {
 
         if (command == "decrypt") {
             return run_decrypt(argc, argv);
+        }
+
+        if (command == "bench") {
+            return run_bench(argc, argv);
         }
 
         std::cerr << "ERROR: unknown command: " << command << "\n";

@@ -20,6 +20,7 @@ add_executable(aestool
     src/aes_extra_modes.cpp
     src/sidecar.cpp
     src/nonce_registry.cpp
+    src/benchmark.cpp
 )
 
 target_include_directories(aestool
