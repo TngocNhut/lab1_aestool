@@ -19,6 +19,7 @@ add_executable(aestool
     src/aes_gcm.cpp
     src/aes_extra_modes.cpp
     src/sidecar.cpp
+    src/nonce_registry.cpp
 )
 
 target_include_directories(aestool

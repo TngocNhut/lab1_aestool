@@ -4,6 +4,7 @@
 #include "aestool/aes_gcm.hpp"
 #include "aestool/encoding.hpp"
 #include "aestool/file_utils.hpp"
+#include "aestool/nonce_registry.hpp"
 #include "aestool/sidecar.hpp"
 
 #include <cryptopp/aes.h>
@@ -212,6 +213,18 @@ int run_encrypt(int argc, char* argv[]) {
         ciphertext = result.ciphertext;
         used_iv = result.iv;
         tag = result.tag;
+    }
+
+    if (mode == "ctr" || mode == "gcm") {
+        const std::string registry_path = "artifacts/windows/nonce_registry.json";
+        aestool::check_and_record_nonce_or_throw(registry_path, mode, key, used_iv);
+        std::cout << "[OK] Nonce registry updated: " << registry_path << "\n";
+    }
+
+    if (mode == "ctr" || mode == "gcm") {
+        const std::string registry_path = "artifacts/windows/nonce_registry.json";
+        aestool::check_and_record_nonce_or_throw(registry_path, mode, key, used_iv);
+        std::cout << "[OK] Nonce registry updated: " << registry_path << "\n";
     }
 
     aestool::write_binary_file(out_path, ciphertext);
