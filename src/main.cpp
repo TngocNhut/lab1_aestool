@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -218,9 +219,20 @@ int run_encrypt(int argc, char* argv[]) {
     }
 
     if (mode == "ctr" || mode == "gcm") {
-        const std::string registry_path = "artifacts/windows/nonce_registry.json";
-        aestool::check_and_record_nonce_or_throw(registry_path, mode, key, used_iv);
-        std::cout << "[OK] Nonce registry updated: " << registry_path << "\n";
+        const std::filesystem::path output_path(out_path);
+        const std::filesystem::path registry_path =
+            output_path.parent_path() / "nonce_registry.json";
+
+        aestool::check_and_record_nonce_or_throw(
+            registry_path.string(),
+            mode,
+            key,
+            used_iv
+        );
+
+        std::cout << "[OK] Nonce registry updated: "
+                  << registry_path.string()
+                  << "\n";
     }
 
     aestool::write_binary_file(out_path, ciphertext);
