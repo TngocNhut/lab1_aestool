@@ -1,0 +1,39 @@
+# Build directories
+build*/
+cmake-build-*/
+
+# CMake/Ninja generated files
+CMakeFiles/
+CMakeCache.txt
+CTestTestfile.cmake
+cmake_install.cmake
+build.ninja
+.ninja_deps
+.ninja_log
+
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.a
+*.lib
+*.o
+*.obj
+
+# Runtime/generated crypto artifacts
+artifacts/**/*.bin
+artifacts/**/*.ct
+artifacts/**/*.key
+artifacts/**/*.sig
+artifacts/**/*.json
+artifacts/**/*.csv
+
+# Temporary files
+*.tmp
+*.log
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
