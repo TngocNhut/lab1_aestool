@@ -223,12 +223,6 @@ int run_encrypt(int argc, char* argv[]) {
         std::cout << "[OK] Nonce registry updated: " << registry_path << "\n";
     }
 
-    if (mode == "ctr" || mode == "gcm") {
-        const std::string registry_path = "artifacts/windows/nonce_registry.json";
-        aestool::check_and_record_nonce_or_throw(registry_path, mode, key, used_iv);
-        std::cout << "[OK] Nonce registry updated: " << registry_path << "\n";
-    }
-
     aestool::write_binary_file(out_path, ciphertext);
 
     const std::string meta_path = out_path + ".json";
