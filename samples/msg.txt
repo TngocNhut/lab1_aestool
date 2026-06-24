@@ -1,0 +1,3 @@
+Hello from Lab 1.
+This is a sample plaintext for AES-CBC encryption using Crypto++.
+Tran Ngoc Nhat

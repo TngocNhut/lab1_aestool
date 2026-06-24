@@ -1,5 +1,7 @@
+#include "aestool/aes_cbc.hpp"
 #include "aestool/encoding.hpp"
 #include "aestool/file_utils.hpp"
+#include "aestool/sidecar.hpp"
 
 #include <cryptopp/aes.h>
 #include <cryptopp/osrng.h>
@@ -21,11 +23,9 @@ void print_help() {
         << "  aestool version\n"
         << "  aestool selftest\n"
         << "  aestool keygen --out key.bin --bits 128|192|256\n"
-        << "  aestool keyinfo --key key.bin\n\n"
-        << "Planned commands:\n"
-        << "  aestool encrypt --mode gcm --key key.bin --in msg.txt --out ct.bin\n"
-        << "  aestool decrypt --mode gcm --key key.bin --in ct.bin --out msg.txt\n"
-        << "  aestool --kat vectors.json\n";
+        << "  aestool keyinfo --key key.bin\n"
+        << "  aestool encrypt --mode cbc --key key.bin --in msg.txt --out ct.bin\n"
+        << "  aestool decrypt --mode cbc --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n\n";
 }
 
 std::string get_arg(int argc, char* argv[], const std::string& name) {
@@ -36,16 +36,6 @@ std::string get_arg(int argc, char* argv[], const std::string& name) {
     }
 
     return {};
-}
-
-bool has_arg(int argc, char* argv[], const std::string& name) {
-    for (int i = 0; i < argc; ++i) {
-        if (argv[i] == name) {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 int run_selftest() {
@@ -133,6 +123,76 @@ int run_keyinfo(int argc, char* argv[]) {
     return 0;
 }
 
+int run_encrypt(int argc, char* argv[]) {
+    const std::string mode = get_arg(argc, argv, "--mode");
+    const std::string key_path = get_arg(argc, argv, "--key");
+    const std::string in_path = get_arg(argc, argv, "--in");
+    const std::string out_path = get_arg(argc, argv, "--out");
+
+    if (mode != "cbc") {
+        std::cerr << "ERROR: this checkpoint currently supports only --mode cbc\n";
+        return 1;
+    }
+
+    if (key_path.empty() || in_path.empty() || out_path.empty()) {
+        std::cerr << "ERROR: encrypt requires --mode cbc --key key.bin --in msg.txt --out ct.bin\n";
+        return 1;
+    }
+
+    const std::vector<uint8_t> key = aestool::read_binary_file(key_path);
+    const std::vector<uint8_t> plaintext = aestool::read_binary_file(in_path);
+
+    const aestool::CbcEncryptResult result = aestool::aes_cbc_encrypt(plaintext, key);
+
+    aestool::write_binary_file(out_path, result.ciphertext);
+
+    const std::string meta_path = out_path + ".json";
+    aestool::write_cbc_sidecar(meta_path, out_path, result.iv, key.size() * 8);
+
+    std::cout << "[OK] AES-CBC encryption completed\n";
+    std::cout << "[OK] Plaintext file: " << in_path << "\n";
+    std::cout << "[OK] Ciphertext file: " << out_path << "\n";
+    std::cout << "[OK] Sidecar JSON: " << meta_path << "\n";
+    std::cout << "[OK] Key size: " << key.size() * 8 << " bits\n";
+    std::cout << "[OK] IV: " << aestool::to_hex(result.iv) << "\n";
+    std::cout << "[OK] Ciphertext size: " << result.ciphertext.size() << " bytes\n";
+
+    return 0;
+}
+
+int run_decrypt(int argc, char* argv[]) {
+    const std::string mode = get_arg(argc, argv, "--mode");
+    const std::string key_path = get_arg(argc, argv, "--key");
+    const std::string in_path = get_arg(argc, argv, "--in");
+    const std::string meta_path = get_arg(argc, argv, "--meta");
+    const std::string out_path = get_arg(argc, argv, "--out");
+
+    if (mode != "cbc") {
+        std::cerr << "ERROR: this checkpoint currently supports only --mode cbc\n";
+        return 1;
+    }
+
+    if (key_path.empty() || in_path.empty() || meta_path.empty() || out_path.empty()) {
+        std::cerr << "ERROR: decrypt requires --mode cbc --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n";
+        return 1;
+    }
+
+    const std::vector<uint8_t> key = aestool::read_binary_file(key_path);
+    const std::vector<uint8_t> ciphertext = aestool::read_binary_file(in_path);
+    const std::vector<uint8_t> iv = aestool::read_iv_from_sidecar(meta_path);
+
+    const std::vector<uint8_t> plaintext = aestool::aes_cbc_decrypt(ciphertext, key, iv);
+    aestool::write_binary_file(out_path, plaintext);
+
+    std::cout << "[OK] AES-CBC decryption completed\n";
+    std::cout << "[OK] Ciphertext file: " << in_path << "\n";
+    std::cout << "[OK] Sidecar JSON: " << meta_path << "\n";
+    std::cout << "[OK] Output plaintext: " << out_path << "\n";
+    std::cout << "[OK] Plaintext size: " << plaintext.size() << " bytes\n";
+
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -165,6 +225,14 @@ int main(int argc, char* argv[]) {
 
         if (command == "keyinfo") {
             return run_keyinfo(argc, argv);
+        }
+
+        if (command == "encrypt") {
+            return run_encrypt(argc, argv);
+        }
+
+        if (command == "decrypt") {
+            return run_decrypt(argc, argv);
         }
 
         std::cerr << "ERROR: unknown command: " << command << "\n";
