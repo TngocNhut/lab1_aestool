@@ -1,4 +1,5 @@
 #include "aestool/aes_cbc.hpp"
+#include "aestool/aes_ctr.hpp"
 #include "aestool/encoding.hpp"
 #include "aestool/file_utils.hpp"
 #include "aestool/sidecar.hpp"
@@ -24,8 +25,8 @@ void print_help() {
         << "  aestool selftest\n"
         << "  aestool keygen --out key.bin --bits 128|192|256\n"
         << "  aestool keyinfo --key key.bin\n"
-        << "  aestool encrypt --mode cbc --key key.bin --in msg.txt --out ct.bin\n"
-        << "  aestool decrypt --mode cbc --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n\n";
+        << "  aestool encrypt --mode cbc|ctr --key key.bin --in msg.txt --out ct.bin [--iv-hex HEX]\n"
+        << "  aestool decrypt --mode cbc|ctr --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n\n";
 }
 
 std::string get_arg(int argc, char* argv[], const std::string& name) {
@@ -128,34 +129,56 @@ int run_encrypt(int argc, char* argv[]) {
     const std::string key_path = get_arg(argc, argv, "--key");
     const std::string in_path = get_arg(argc, argv, "--in");
     const std::string out_path = get_arg(argc, argv, "--out");
+    const std::string iv_hex = get_arg(argc, argv, "--iv-hex");
 
-    if (mode != "cbc") {
-        std::cerr << "ERROR: this checkpoint currently supports only --mode cbc\n";
+    if (mode != "cbc" && mode != "ctr") {
+        std::cerr << "ERROR: encrypt currently supports --mode cbc|ctr\n";
         return 1;
     }
 
     if (key_path.empty() || in_path.empty() || out_path.empty()) {
-        std::cerr << "ERROR: encrypt requires --mode cbc --key key.bin --in msg.txt --out ct.bin\n";
+        std::cerr << "ERROR: encrypt requires --mode cbc|ctr --key key.bin --in msg.txt --out ct.bin\n";
         return 1;
     }
 
     const std::vector<uint8_t> key = aestool::read_binary_file(key_path);
     const std::vector<uint8_t> plaintext = aestool::read_binary_file(in_path);
 
-    const aestool::CbcEncryptResult result = aestool::aes_cbc_encrypt(plaintext, key);
+    std::vector<uint8_t> iv;
+    if (!iv_hex.empty()) {
+        iv = aestool::from_hex(iv_hex);
+    }
 
-    aestool::write_binary_file(out_path, result.ciphertext);
+    std::vector<uint8_t> ciphertext;
+    std::vector<uint8_t> used_iv;
+
+    if (mode == "cbc") {
+        if (!iv.empty()) {
+            std::cerr << "ERROR: this checkpoint auto-generates CBC IV; --iv-hex is only enabled for CTR\n";
+            return 1;
+        }
+
+        const aestool::CbcEncryptResult result = aestool::aes_cbc_encrypt(plaintext, key);
+        ciphertext = result.ciphertext;
+        used_iv = result.iv;
+    } else {
+        const aestool::CtrCryptResult result = aestool::aes_ctr_encrypt(plaintext, key, iv);
+        ciphertext = result.output;
+        used_iv = result.iv;
+    }
+
+    aestool::write_binary_file(out_path, ciphertext);
 
     const std::string meta_path = out_path + ".json";
-    aestool::write_cbc_sidecar(meta_path, out_path, result.iv, key.size() * 8);
+    aestool::write_mode_sidecar(meta_path, out_path, mode, used_iv, key.size() * 8);
 
-    std::cout << "[OK] AES-CBC encryption completed\n";
+    std::cout << "[OK] AES-" << mode << " encryption completed\n";
     std::cout << "[OK] Plaintext file: " << in_path << "\n";
     std::cout << "[OK] Ciphertext file: " << out_path << "\n";
     std::cout << "[OK] Sidecar JSON: " << meta_path << "\n";
     std::cout << "[OK] Key size: " << key.size() * 8 << " bits\n";
-    std::cout << "[OK] IV: " << aestool::to_hex(result.iv) << "\n";
-    std::cout << "[OK] Ciphertext size: " << result.ciphertext.size() << " bytes\n";
+    std::cout << "[OK] IV: " << aestool::to_hex(used_iv) << "\n";
+    std::cout << "[OK] Ciphertext size: " << ciphertext.size() << " bytes\n";
 
     return 0;
 }
@@ -167,24 +190,31 @@ int run_decrypt(int argc, char* argv[]) {
     const std::string meta_path = get_arg(argc, argv, "--meta");
     const std::string out_path = get_arg(argc, argv, "--out");
 
-    if (mode != "cbc") {
-        std::cerr << "ERROR: this checkpoint currently supports only --mode cbc\n";
+    if (mode != "cbc" && mode != "ctr") {
+        std::cerr << "ERROR: decrypt currently supports --mode cbc|ctr\n";
         return 1;
     }
 
     if (key_path.empty() || in_path.empty() || meta_path.empty() || out_path.empty()) {
-        std::cerr << "ERROR: decrypt requires --mode cbc --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n";
+        std::cerr << "ERROR: decrypt requires --mode cbc|ctr --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n";
         return 1;
     }
 
     const std::vector<uint8_t> key = aestool::read_binary_file(key_path);
     const std::vector<uint8_t> ciphertext = aestool::read_binary_file(in_path);
-    const std::vector<uint8_t> iv = aestool::read_iv_from_sidecar(meta_path);
+    const std::vector<uint8_t> iv = aestool::read_iv_from_sidecar(meta_path, mode);
 
-    const std::vector<uint8_t> plaintext = aestool::aes_cbc_decrypt(ciphertext, key, iv);
+    std::vector<uint8_t> plaintext;
+
+    if (mode == "cbc") {
+        plaintext = aestool::aes_cbc_decrypt(ciphertext, key, iv);
+    } else {
+        plaintext = aestool::aes_ctr_decrypt(ciphertext, key, iv);
+    }
+
     aestool::write_binary_file(out_path, plaintext);
 
-    std::cout << "[OK] AES-CBC decryption completed\n";
+    std::cout << "[OK] AES-" << mode << " decryption completed\n";
     std::cout << "[OK] Ciphertext file: " << in_path << "\n";
     std::cout << "[OK] Sidecar JSON: " << meta_path << "\n";
     std::cout << "[OK] Output plaintext: " << out_path << "\n";

@@ -15,6 +15,7 @@ add_executable(aestool
     src/file_utils.cpp
     src/encoding.cpp
     src/aes_cbc.cpp
+    src/aes_ctr.cpp
     src/sidecar.cpp
 )
 

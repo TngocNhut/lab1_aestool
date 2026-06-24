@@ -9,22 +9,28 @@
 
 namespace aestool {
 
-void write_cbc_sidecar(
+void write_mode_sidecar(
     const std::string& meta_path,
     const std::string& ciphertext_file,
+    const std::string& mode,
     const std::vector<uint8_t>& iv,
     size_t key_bits
 ) {
     nlohmann::json j;
     j["created_by"] = "aestool";
     j["version"] = "1.0";
-    j["alg"] = "AES-" + std::to_string(key_bits) + "-CBC";
-    j["mode"] = "cbc";
+    j["alg"] = "AES-" + std::to_string(key_bits) + "-" + mode;
+    j["mode"] = mode;
     j["key_bits"] = key_bits;
     j["iv"] = to_hex(iv);
     j["ciphertext_file"] = ciphertext_file;
     j["encoding"] = "raw";
-    j["padding"] = "PKCS#7";
+
+    if (mode == "cbc") {
+        j["padding"] = "PKCS#7";
+    } else {
+        j["padding"] = "none";
+    }
 
     std::ofstream out(meta_path);
     if (!out) {
@@ -34,7 +40,10 @@ void write_cbc_sidecar(
     out << j.dump(4) << "\n";
 }
 
-std::vector<uint8_t> read_iv_from_sidecar(const std::string& meta_path) {
+std::vector<uint8_t> read_iv_from_sidecar(
+    const std::string& meta_path,
+    const std::string& expected_mode
+) {
     std::ifstream in(meta_path);
     if (!in) {
         throw std::runtime_error("cannot open sidecar JSON: " + meta_path);
@@ -43,8 +52,8 @@ std::vector<uint8_t> read_iv_from_sidecar(const std::string& meta_path) {
     nlohmann::json j;
     in >> j;
 
-    if (!j.contains("mode") || j["mode"] != "cbc") {
-        throw std::runtime_error("sidecar JSON is not AES-CBC metadata");
+    if (!j.contains("mode") || j["mode"] != expected_mode) {
+        throw std::runtime_error("sidecar JSON mode mismatch");
     }
 
     if (!j.contains("iv") || !j["iv"].is_string()) {
@@ -52,6 +61,15 @@ std::vector<uint8_t> read_iv_from_sidecar(const std::string& meta_path) {
     }
 
     return from_hex(j["iv"].get<std::string>());
+}
+
+void write_cbc_sidecar(
+    const std::string& meta_path,
+    const std::string& ciphertext_file,
+    const std::vector<uint8_t>& iv,
+    size_t key_bits
+) {
+    write_mode_sidecar(meta_path, ciphertext_file, "cbc", iv, key_bits);
 }
 
 } // namespace aestool
