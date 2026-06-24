@@ -17,6 +17,7 @@ add_executable(aestool
     src/aes_cbc.cpp
     src/aes_ctr.cpp
     src/aes_gcm.cpp
+    src/aes_extra_modes.cpp
     src/sidecar.cpp
 )
 

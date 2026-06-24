@@ -1,5 +1,6 @@
 #include "aestool/aes_cbc.hpp"
 #include "aestool/aes_ctr.hpp"
+#include "aestool/aes_extra_modes.hpp"
 #include "aestool/aes_gcm.hpp"
 #include "aestool/encoding.hpp"
 #include "aestool/file_utils.hpp"
@@ -17,6 +18,8 @@
 
 namespace {
 
+constexpr size_t ECB_DEFAULT_MAX_BYTES = 16 * 1024;
+
 void print_help() {
     std::cout
         << "aestool - Lab 1 Symmetric Encryption Tool using Crypto++\n\n"
@@ -26,8 +29,8 @@ void print_help() {
         << "  aestool selftest\n"
         << "  aestool keygen --out key.bin --bits 128|192|256\n"
         << "  aestool keyinfo --key key.bin\n"
-        << "  aestool encrypt --mode cbc|ctr|gcm --key key.bin --in msg.txt --out ct.bin [--iv-hex HEX] [--aad-text TEXT]\n"
-        << "  aestool decrypt --mode cbc|ctr|gcm --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n\n";
+        << "  aestool encrypt --mode ecb|cbc|cfb|ofb|ctr|gcm --key key.bin --in msg.txt --out ct.bin [--iv-hex HEX] [--aad-text TEXT] [--allow-ecb]\n"
+        << "  aestool decrypt --mode ecb|cbc|cfb|ofb|ctr|gcm --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n\n";
 }
 
 std::string get_arg(int argc, char* argv[], const std::string& name) {
@@ -36,8 +39,21 @@ std::string get_arg(int argc, char* argv[], const std::string& name) {
             return argv[i + 1];
         }
     }
-
     return {};
+}
+
+bool has_arg(int argc, char* argv[], const std::string& name) {
+    for (int i = 0; i < argc; ++i) {
+        if (argv[i] == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_supported_mode(const std::string& mode) {
+    return mode == "ecb" || mode == "cbc" || mode == "cfb" ||
+           mode == "ofb" || mode == "ctr" || mode == "gcm";
 }
 
 std::vector<uint8_t> string_to_bytes(const std::string& s) {
@@ -45,22 +61,17 @@ std::vector<uint8_t> string_to_bytes(const std::string& s) {
 }
 
 int run_selftest() {
-    try {
-        CryptoPP::AutoSeededRandomPool rng;
+    CryptoPP::AutoSeededRandomPool rng;
 
-        CryptoPP::SecByteBlock key(CryptoPP::AES::DEFAULT_KEYLENGTH);
-        rng.GenerateBlock(key, key.size());
+    CryptoPP::SecByteBlock key(CryptoPP::AES::DEFAULT_KEYLENGTH);
+    rng.GenerateBlock(key, key.size());
 
-        std::cout << "[OK] Crypto++ AutoSeededRandomPool works\n";
-        std::cout << "[OK] AES block size: " << CryptoPP::AES::BLOCKSIZE << " bytes\n";
-        std::cout << "[OK] AES default key length: " << CryptoPP::AES::DEFAULT_KEYLENGTH << " bytes\n";
-        std::cout << "[OK] Generated random test key: " << key.size() << " bytes\n";
+    std::cout << "[OK] Crypto++ AutoSeededRandomPool works\n";
+    std::cout << "[OK] AES block size: " << CryptoPP::AES::BLOCKSIZE << " bytes\n";
+    std::cout << "[OK] AES default key length: " << CryptoPP::AES::DEFAULT_KEYLENGTH << " bytes\n";
+    std::cout << "[OK] Generated random test key: " << key.size() << " bytes\n";
 
-        return 0;
-    } catch (const std::exception& ex) {
-        std::cerr << "[FAIL] Selftest failed: " << ex.what() << "\n";
-        return 1;
-    }
+    return 0;
 }
 
 int run_keygen(int argc, char* argv[]) {
@@ -90,8 +101,7 @@ int run_keygen(int argc, char* argv[]) {
         return 1;
     }
 
-    const size_t key_bytes = static_cast<size_t>(bits / 8);
-    std::vector<uint8_t> key(key_bytes);
+    std::vector<uint8_t> key(static_cast<size_t>(bits / 8));
 
     CryptoPP::AutoSeededRandomPool rng;
     rng.GenerateBlock(key.data(), key.size());
@@ -136,14 +146,15 @@ int run_encrypt(int argc, char* argv[]) {
     const std::string out_path = get_arg(argc, argv, "--out");
     const std::string iv_hex = get_arg(argc, argv, "--iv-hex");
     const std::string aad_text = get_arg(argc, argv, "--aad-text");
+    const bool allow_ecb = has_arg(argc, argv, "--allow-ecb");
 
-    if (mode != "cbc" && mode != "ctr" && mode != "gcm") {
-        std::cerr << "ERROR: encrypt currently supports --mode cbc|ctr|gcm\n";
+    if (!is_supported_mode(mode)) {
+        std::cerr << "ERROR: encrypt supports --mode ecb|cbc|cfb|ofb|ctr|gcm\n";
         return 1;
     }
 
     if (key_path.empty() || in_path.empty() || out_path.empty()) {
-        std::cerr << "ERROR: encrypt requires --mode cbc|ctr|gcm --key key.bin --in msg.txt --out ct.bin\n";
+        std::cerr << "ERROR: encrypt requires --mode MODE --key key.bin --in msg.txt --out ct.bin\n";
         return 1;
     }
 
@@ -161,13 +172,35 @@ int run_encrypt(int argc, char* argv[]) {
     std::vector<uint8_t> used_iv;
     std::vector<uint8_t> tag;
 
-    if (mode == "cbc") {
+    if (mode == "ecb") {
+        std::cerr << "WARNING: ECB mode is insecure because identical plaintext blocks produce identical ciphertext blocks.\n";
+
         if (!iv.empty()) {
-            std::cerr << "ERROR: this checkpoint auto-generates CBC IV; --iv-hex is only enabled for CTR/GCM\n";
+            std::cerr << "ERROR: ECB does not use IV\n";
+            return 1;
+        }
+
+        if (plaintext.size() > ECB_DEFAULT_MAX_BYTES && !allow_ecb) {
+            std::cerr << "ERROR: ECB is blocked for files larger than 16 KiB by default. Use --allow-ecb only for controlled lab demonstration.\n";
+            return 1;
+        }
+
+        ciphertext = aestool::aes_ecb_encrypt(plaintext, key);
+    } else if (mode == "cbc") {
+        if (!iv.empty()) {
+            std::cerr << "ERROR: this checkpoint auto-generates CBC IV; --iv-hex is enabled for CFB/OFB/CTR/GCM\n";
             return 1;
         }
 
         const aestool::CbcEncryptResult result = aestool::aes_cbc_encrypt(plaintext, key);
+        ciphertext = result.ciphertext;
+        used_iv = result.iv;
+    } else if (mode == "cfb") {
+        const aestool::IvModeEncryptResult result = aestool::aes_cfb_encrypt(plaintext, key, iv);
+        ciphertext = result.ciphertext;
+        used_iv = result.iv;
+    } else if (mode == "ofb") {
+        const aestool::IvModeEncryptResult result = aestool::aes_ofb_encrypt(plaintext, key, iv);
         ciphertext = result.ciphertext;
         used_iv = result.iv;
     } else if (mode == "ctr") {
@@ -195,11 +228,16 @@ int run_encrypt(int argc, char* argv[]) {
     std::cout << "[OK] Ciphertext file: " << out_path << "\n";
     std::cout << "[OK] Sidecar JSON: " << meta_path << "\n";
     std::cout << "[OK] Key size: " << key.size() * 8 << " bits\n";
-    std::cout << "[OK] IV: " << aestool::to_hex(used_iv) << "\n";
+
+    if (!used_iv.empty()) {
+        std::cout << "[OK] IV: " << aestool::to_hex(used_iv) << "\n";
+    }
+
     if (mode == "gcm") {
         std::cout << "[OK] Tag: " << aestool::to_hex(tag) << "\n";
         std::cout << "[OK] AAD hex: " << aestool::to_hex(aad) << "\n";
     }
+
     std::cout << "[OK] Ciphertext size: " << ciphertext.size() << " bytes\n";
 
     return 0;
@@ -212,30 +250,39 @@ int run_decrypt(int argc, char* argv[]) {
     const std::string meta_path = get_arg(argc, argv, "--meta");
     const std::string out_path = get_arg(argc, argv, "--out");
 
-    if (mode != "cbc" && mode != "ctr" && mode != "gcm") {
-        std::cerr << "ERROR: decrypt currently supports --mode cbc|ctr|gcm\n";
+    if (!is_supported_mode(mode)) {
+        std::cerr << "ERROR: decrypt supports --mode ecb|cbc|cfb|ofb|ctr|gcm\n";
         return 1;
     }
 
     if (key_path.empty() || in_path.empty() || meta_path.empty() || out_path.empty()) {
-        std::cerr << "ERROR: decrypt requires --mode cbc|ctr|gcm --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n";
+        std::cerr << "ERROR: decrypt requires --mode MODE --key key.bin --in ct.bin --meta ct.bin.json --out msg.txt\n";
         return 1;
     }
 
     const std::vector<uint8_t> key = aestool::read_binary_file(key_path);
     const std::vector<uint8_t> ciphertext = aestool::read_binary_file(in_path);
-    const std::vector<uint8_t> iv = aestool::read_iv_from_sidecar(meta_path, mode);
 
     std::vector<uint8_t> plaintext;
 
-    if (mode == "cbc") {
-        plaintext = aestool::aes_cbc_decrypt(ciphertext, key, iv);
-    } else if (mode == "ctr") {
-        plaintext = aestool::aes_ctr_decrypt(ciphertext, key, iv);
+    if (mode == "ecb") {
+        plaintext = aestool::aes_ecb_decrypt(ciphertext, key);
     } else {
-        const std::vector<uint8_t> tag = aestool::read_tag_from_sidecar(meta_path, mode);
-        const std::vector<uint8_t> aad = aestool::read_aad_from_sidecar(meta_path, mode);
-        plaintext = aestool::aes_gcm_decrypt(ciphertext, key, iv, aad, tag);
+        const std::vector<uint8_t> iv = aestool::read_iv_from_sidecar(meta_path, mode);
+
+        if (mode == "cbc") {
+            plaintext = aestool::aes_cbc_decrypt(ciphertext, key, iv);
+        } else if (mode == "cfb") {
+            plaintext = aestool::aes_cfb_decrypt(ciphertext, key, iv);
+        } else if (mode == "ofb") {
+            plaintext = aestool::aes_ofb_decrypt(ciphertext, key, iv);
+        } else if (mode == "ctr") {
+            plaintext = aestool::aes_ctr_decrypt(ciphertext, key, iv);
+        } else {
+            const std::vector<uint8_t> tag = aestool::read_tag_from_sidecar(meta_path, mode);
+            const std::vector<uint8_t> aad = aestool::read_aad_from_sidecar(meta_path, mode);
+            plaintext = aestool::aes_gcm_decrypt(ciphertext, key, iv, aad, tag);
+        }
     }
 
     aestool::write_binary_file(out_path, plaintext);
